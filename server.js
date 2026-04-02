@@ -46,6 +46,8 @@ const UserSchema = new mongoose.Schema({
   password: String,
   points: { type: Number, default: 100 },
   isAdmin: { type: Boolean, default: false },
+  dliveUsername: { type: String, default: null, lowercase: true },
+  linkCode: { type: String, unique: true, sparse: true },
   createdAt: { type: Date, default: Date.now }
 });
 const User = mongoose.model('User', UserSchema);
@@ -87,10 +89,12 @@ app.post('/api/register', async (req, res) => {
     const { username, password } = req.body;
     if (!username || !password) return res.status(400).json({ error: 'Champs manquants' });
     const hashed = await bcrypt.hash(password, 10);
-    const user = new User({ username: username.toLowerCase(), password: hashed });
+    // Generate unique 6-char link code
+    const linkCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+    const user = new User({ username: username.toLowerCase(), password: hashed, linkCode });
     await user.save();
     const token = jwt.sign({ id: user._id, username: user.username, isAdmin: user.isAdmin }, process.env.JWT_SECRET);
-    res.json({ token, username: user.username, points: user.points, isAdmin: user.isAdmin });
+    res.json({ token, username: user.username, points: user.points, isAdmin: user.isAdmin, linkCode: user.linkCode, dliveUsername: user.dliveUsername });
   } catch (e) {
     if (e.code === 11000) return res.status(400).json({ error: 'Pseudo déjà pris' });
     res.status(500).json({ error: 'Erreur serveur' });
@@ -104,8 +108,13 @@ app.post('/api/login', async (req, res) => {
     if (!user) return res.status(400).json({ error: 'Utilisateur introuvable' });
     const valid = await bcrypt.compare(password, user.password);
     if (!valid) return res.status(400).json({ error: 'Mot de passe incorrect' });
+    // Generate linkCode if missing
+    if (!user.linkCode) {
+      user.linkCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+      await user.save();
+    }
     const token = jwt.sign({ id: user._id, username: user.username, isAdmin: user.isAdmin }, process.env.JWT_SECRET);
-    res.json({ token, username: user.username, points: user.points, isAdmin: user.isAdmin });
+    res.json({ token, username: user.username, points: user.points, isAdmin: user.isAdmin, linkCode: user.linkCode, dliveUsername: user.dliveUsername });
   } catch {
     res.status(500).json({ error: 'Erreur serveur' });
   }
@@ -275,6 +284,26 @@ function startDLiveBot() {
       const sender = event.sender?.username?.toLowerCase();
       const displayName = event.sender?.displayname || sender;
 
+      // Commande !link CODE — lier compte DLive au compte site
+      const linkMatch = content.match(/^!link\s+([a-z0-9]+)$/i);
+      if (linkMatch) {
+        const code = linkMatch[1].toUpperCase();
+        const user = await User.findOne({ linkCode: code });
+        if (!user) {
+          console.log(`[BOT] !link ${code} — code introuvable`);
+          return;
+        }
+        if (user.dliveUsername && user.dliveUsername !== sender) {
+          console.log(`[BOT] !link — compte déjà lié à ${user.dliveUsername}`);
+          return;
+        }
+        user.dliveUsername = sender;
+        await user.save();
+        broadcast({ type: 'dlive_linked', username: user.username, dliveUsername: sender });
+        console.log(`[BOT] ${sender} lié au compte site ${user.username} ✅`);
+        return;
+      }
+
       // Commande !raffle<montant> — admin seulement
       const raffleMatch = content.match(/^!raffle(\d+)$/);
       if (raffleMatch && ADMIN_USERS.includes(sender)) {
@@ -290,15 +319,21 @@ function startDLiveBot() {
         return;
       }
 
-      // Commande !join — rejoindre la raffle
+      // Commande !join — rejoindre la raffle via pseudo DLive
       if (content === '!join') {
         const raffle = await Raffle.findOne({ status: 'active' });
         if (!raffle || raffle.endsAt < new Date()) return;
-        if (raffle.participants.includes(displayName)) return;
-        raffle.participants.push(displayName);
+        // Chercher le compte site lié à ce pseudo DLive
+        const user = await User.findOne({ dliveUsername: sender });
+        if (!user) {
+          console.log(`[BOT] !join — ${sender} n'a pas lié son compte (utilise !link CODE)`);
+          return;
+        }
+        if (raffle.participants.includes(user.username)) return;
+        raffle.participants.push(user.username);
         await raffle.save();
-        broadcast({ type: 'raffle_join', username: displayName, count: raffle.participants.length });
-        console.log(`[BOT] ${displayName} a rejoint la raffle`);
+        broadcast({ type: 'raffle_join', username: user.username, count: raffle.participants.length });
+        console.log(`[BOT] ${sender} (→ ${user.username}) a rejoint la raffle`);
         return;
       }
 
