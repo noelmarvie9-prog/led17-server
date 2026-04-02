@@ -44,10 +44,11 @@ mongoose.connect(process.env.MONGODB_URI);
 const UserSchema = new mongoose.Schema({
   username: { type: String, unique: true, lowercase: true },
   password: String,
-  points: { type: Number, default: 100 },
+  points: { type: Number, default: 0 },
   isAdmin: { type: Boolean, default: false },
   dliveUsername: { type: String, default: null, lowercase: true },
   linkCode: { type: String, unique: true, sparse: true },
+  lastSpin: { type: Date, default: null },
   createdAt: { type: Date, default: Date.now }
 });
 const User = mongoose.model('User', UserSchema);
@@ -131,6 +132,45 @@ app.get('/api/me', authMiddleware, async (req, res) => {
 app.get('/api/leaderboard', async (req, res) => {
   const users = await User.find().sort({ points: -1 }).limit(20).select('username points');
   res.json(users);
+});
+
+// ══════════════════════════════════════
+//  ROUTE ROUE — 24h cooldown
+// ══════════════════════════════════════
+app.post('/api/wheel/spin', authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    const now = new Date();
+    if (user.lastSpin) {
+      const diff = now - new Date(user.lastSpin);
+      const hours24 = 24 * 60 * 60 * 1000;
+      if (diff < hours24) {
+        const remaining = hours24 - diff;
+        const h = Math.floor(remaining / 3600000);
+        const m = Math.floor((remaining % 3600000) / 60000);
+        return res.status(400).json({ error: `Reviens dans ${h}h ${m}min !` });
+      }
+    }
+    const { prize } = req.body;
+    user.points = Math.max(0, user.points + (prize || 0));
+    user.lastSpin = now;
+    await user.save();
+    broadcast({ type: 'points_update', username: user.username, points: user.points });
+    res.json({ points: user.points, lastSpin: user.lastSpin });
+  } catch {
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+app.get('/api/wheel/status', authMiddleware, async (req, res) => {
+  const user = await User.findById(req.user.id);
+  const now = new Date();
+  if (!user.lastSpin) return res.json({ canSpin: true, nextSpin: null });
+  const diff = now - new Date(user.lastSpin);
+  const hours24 = 24 * 60 * 60 * 1000;
+  if (diff >= hours24) return res.json({ canSpin: true, nextSpin: null });
+  const nextSpin = new Date(new Date(user.lastSpin).getTime() + hours24);
+  res.json({ canSpin: false, nextSpin });
 });
 
 // ══════════════════════════════════════
