@@ -45,6 +45,7 @@ const UserSchema = new mongoose.Schema({
   username: { type: String, unique: true, lowercase: true },
   password: String,
   points: { type: Number, default: 0 },
+  totalWagered: { type: Number, default: 0 },
   isAdmin: { type: Boolean, default: false },
   dliveUsername: { type: String, default: null, lowercase: true },
   linkCode: { type: String, unique: true, sparse: true },
@@ -58,7 +59,13 @@ UserSchema.pre('save', function(next) {
 });
 const User = mongoose.model('User', UserSchema);
 
-const RaffleSchema = new mongoose.Schema({
+const SlotCallSchema = new mongoose.Schema({
+  dliveUsername: String,
+  siteUsername: String,
+  slotName: String,
+  createdAt: { type: Date, default: Date.now }
+});
+const SlotCall = mongoose.model('SlotCall', SlotCallSchema);
   prize: Number,
   participants: [String],
   winner: String,
@@ -135,8 +142,20 @@ app.get('/api/me', authMiddleware, async (req, res) => {
 });
 
 app.get('/api/leaderboard', async (req, res) => {
-  const users = await User.find().sort({ points: -1 }).limit(20).select('username points');
+  const users = await User.find().sort({ totalWagered: -1 }).limit(20).select('username points totalWagered');
   res.json(users);
+});
+
+// Track wager when points are updated
+app.post('/api/points/update', authMiddleware, async (req, res) => {
+  const { delta } = req.body;
+  const user = await User.findById(req.user.id);
+  user.points = Math.max(0, user.points + delta);
+  // Track wagers (negative delta = mise)
+  if (delta < 0) user.totalWagered = (user.totalWagered || 0) + Math.abs(delta);
+  await user.save();
+  broadcast({ type: 'points_update', username: user.username, points: user.points });
+  res.json({ points: user.points });
 });
 
 // ══════════════════════════════════════
@@ -167,6 +186,30 @@ app.post('/api/wheel/spin', authMiddleware, async (req, res) => {
   }
 });
 
+// ══════════════════════════════════════
+//  ROUTE LIAISON DLIVE
+// ══════════════════════════════════════
+app.post('/api/dlive/link', authMiddleware, async (req, res) => {
+  try {
+    const { dliveUsername } = req.body;
+    if (!dliveUsername || dliveUsername.trim().length < 2) {
+      return res.status(400).json({ error: 'Pseudo DLive invalide' });
+    }
+    const user = await User.findById(req.user.id);
+    // Check if this DLive username is already linked to another account
+    const existing = await User.findOne({ dliveUsername: dliveUsername.toLowerCase(), _id: { $ne: user._id } });
+    if (existing) {
+      return res.status(400).json({ error: 'Ce pseudo DLive est déjà lié à un autre compte' });
+    }
+    user.dliveUsername = dliveUsername.toLowerCase().trim();
+    await user.save();
+    broadcast({ type: 'dlive_linked', username: user.username, dliveUsername: user.dliveUsername });
+    res.json({ success: true, dliveUsername: user.dliveUsername });
+  } catch {
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 app.get('/api/wheel/status', authMiddleware, async (req, res) => {
   const user = await User.findById(req.user.id);
   const now = new Date();
@@ -179,15 +222,16 @@ app.get('/api/wheel/status', authMiddleware, async (req, res) => {
 });
 
 // ══════════════════════════════════════
-//  ROUTES POINTS
+//  ROUTES SLOT CALLS
 // ══════════════════════════════════════
-app.post('/api/points/update', authMiddleware, async (req, res) => {
-  const { delta } = req.body;
-  const user = await User.findById(req.user.id);
-  user.points = Math.max(0, user.points + delta);
-  await user.save();
-  broadcast({ type: 'points_update', username: user.username, points: user.points });
-  res.json({ points: user.points });
+app.get('/api/slotcalls', authMiddleware, adminMiddleware, async (req, res) => {
+  const calls = await SlotCall.find().sort({ createdAt: -1 }).limit(50);
+  res.json(calls);
+});
+
+app.delete('/api/slotcalls/:id', authMiddleware, adminMiddleware, async (req, res) => {
+  await SlotCall.findByIdAndDelete(req.params.id);
+  res.json({ success: true });
 });
 
 // ══════════════════════════════════════
@@ -328,6 +372,19 @@ function startDLiveBot() {
       const content = event.content?.trim().toLowerCase();
       const sender = event.sender?.username?.toLowerCase();
       const displayName = event.sender?.displayname || sender;
+
+      // Commande !call nomslot
+      const callMatch = content.match(/^!call\s+(.+)$/i);
+      if (callMatch) {
+        const slotName = callMatch[1].trim();
+        const user = await User.findOne({ dliveUsername: sender });
+        const siteUsername = user ? user.username : null;
+        const call = new SlotCall({ dliveUsername: sender, siteUsername, slotName });
+        await call.save();
+        broadcast({ type: 'slot_call', dliveUsername: sender, siteUsername, slotName, id: call._id });
+        console.log(`[BOT] !call ${slotName} par ${sender}`);
+        return;
+      }
 
       // Commande !link CODE — lier compte DLive au compte site
       const linkMatch = content.match(/^!link\s+([a-z0-9]+)$/i);
