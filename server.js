@@ -66,6 +66,8 @@ const SlotCallSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 const SlotCall = mongoose.model('SlotCall', SlotCallSchema);
+
+const RaffleSchema = new mongoose.Schema({
   prize: Number,
   participants: [String],
   winner: String,
