@@ -195,22 +195,31 @@ async function finishRaffle(raffleId) {
 
   if (raffle.participants.length === 0) {
     await raffle.save();
-    broadcast({ type: 'raffle_end', winner: null, prize: raffle.prize, message: 'Personne n\'a participé !' });
+    broadcast({ type: 'raffle_end', winners: [], prize: raffle.prize, each: 0, message: 'Personne n\'a participé !' });
     return;
   }
 
-  const winner = raffle.participants[Math.floor(Math.random() * raffle.participants.length)];
-  raffle.winner = winner;
+  const count = raffle.participants.length;
+  const each = Math.floor(raffle.prize / count);
+  raffle.winner = raffle.participants.join(', ');
   await raffle.save();
 
-  // Créditer les points au gagnant
-  await User.findOneAndUpdate(
-    { username: winner },
-    { $inc: { points: raffle.prize } }
-  );
+  // Créditer les points à TOUS les participants
+  for (const username of raffle.participants) {
+    await User.findOneAndUpdate(
+      { username: username.toLowerCase() },
+      { $inc: { points: each } }
+    );
+  }
 
-  broadcast({ type: 'raffle_end', winner, prize: raffle.prize, message: `🎉 ${winner} gagne ${raffle.prize} pts !` });
-  console.log(`[RAFFLE] Gagnant: ${winner} — +${raffle.prize} pts`);
+  broadcast({
+    type: 'raffle_end',
+    winners: raffle.participants,
+    prize: raffle.prize,
+    each,
+    message: `🎉 ${count} gagnant(s) — chacun reçoit ${each} pts !`
+  });
+  console.log(`[RAFFLE] ${count} gagnant(s) — +${each} pts chacun`);
 }
 
 // Endpoint admin pour forcer la fin
@@ -270,7 +279,7 @@ function startDLiveBot() {
       const raffleMatch = content.match(/^!raffle(\d+)$/);
       if (raffleMatch && ADMIN_USERS.includes(sender)) {
         const prize = parseInt(raffleMatch[1]);
-        const duration = 120; // 2 minutes
+        const duration = 60; // 1 minute
         await Raffle.updateMany({ status: 'active' }, { status: 'finished' });
         const endsAt = new Date(Date.now() + duration * 1000);
         const raffle = new Raffle({ prize, endsAt });
