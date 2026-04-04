@@ -341,9 +341,9 @@ const ADMIN_USERS = (process.env.ADMIN_USERS || '').toLowerCase().split(',').map
 async function sendChatMessage(message) {
   const token = process.env.DLIVE_BOT_TOKEN;
   const streamer = process.env.DLIVE_USERNAME;
-  if (!token || !streamer) return;
+  if (!token || !streamer) { console.log('[BOT] Token ou streamer manquant'); return; }
   try {
-    await fetch(DLIVE_API, {
+    const res = await fetch(DLIVE_API, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -363,7 +363,8 @@ async function sendChatMessage(message) {
         }
       })
     });
-    console.log(`[BOT] Message envoyé : ${message}`);
+    const data = await res.json();
+    console.log('[BOT] Réponse envoi message:', JSON.stringify(data));
   } catch(e) {
     console.error('[BOT] Erreur envoi message:', e.message);
   }
