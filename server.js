@@ -409,9 +409,10 @@ function startDLiveBot() {
       }
 
       // Commande !raffle<montant> — admin seulement
-      const raffleMatch = content.match(/^!raffle(\d+)$/);
+      // Commande !raffle ou !raffle <montant> — admin seulement
+      const raffleMatch = content.match(/^!raffle\s*(\d*)$/);
       if (raffleMatch && ADMIN_USERS.includes(sender)) {
-        const prize = parseInt(raffleMatch[1]);
+        const prize = parseInt(raffleMatch[1]) || 1000; // défaut 1000 si pas de montant
         const duration = 60; // 1 minute
         await Raffle.updateMany({ status: 'active' }, { status: 'finished' });
         const endsAt = new Date(Date.now() + duration * 1000);
