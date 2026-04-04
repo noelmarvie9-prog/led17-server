@@ -320,6 +320,7 @@ async function finishRaffle(raffleId) {
     message: `🎉 ${count} gagnant(s) — chacun reçoit ${each} pts !`
   });
   console.log(`[RAFFLE] ${count} gagnant(s) — +${each} pts chacun`);
+  await sendChatMessage(`🎉 Raffle terminée ! ${count} gagnant(s) — chacun reçoit ${each} pts sur le site !`);
 }
 
 // Endpoint admin pour forcer la fin
@@ -334,7 +335,39 @@ app.post('/api/raffle/finish', authMiddleware, adminMiddleware, async (req, res)
 //  BOT DLIVE — Écoute le chat
 // ══════════════════════════════════════
 const DLIVE_WS = 'wss://graphigostream.prd.dlive.tv';
+const DLIVE_API = 'https://graphigo.prd.dlive.tv/';
 const ADMIN_USERS = (process.env.ADMIN_USERS || '').toLowerCase().split(',').map(s => s.trim());
+
+async function sendChatMessage(message) {
+  const token = process.env.DLIVE_BOT_TOKEN;
+  const streamer = process.env.DLIVE_USERNAME;
+  if (!token || !streamer) return;
+  try {
+    await fetch(DLIVE_API, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': token
+      },
+      body: JSON.stringify({
+        query: `mutation SendStreamChatMessage($input: SendStreamChatMessageInput!) {
+          sendStreamChatMessage(input: $input) { err { code message } }
+        }`,
+        variables: {
+          input: {
+            streamer: streamer.toLowerCase(),
+            message,
+            roomRole: 'Member',
+            subscribing: false
+          }
+        }
+      })
+    });
+    console.log(`[BOT] Message envoyé : ${message}`);
+  } catch(e) {
+    console.error('[BOT] Erreur envoi message:', e.message);
+  }
+}
 
 const DLIVE_SUBSCRIPTION = (username) => JSON.stringify({
   type: 'start',
@@ -405,6 +438,7 @@ function startDLiveBot() {
         await user.save();
         broadcast({ type: 'dlive_linked', username: user.username, dliveUsername: sender });
         console.log(`[BOT] ${sender} lié au compte site ${user.username} ✅`);
+        await sendChatMessage(`✅ ${displayName} ton compte DLive est bien lié au site LeD17 ! Tu peux maintenant participer aux raffles avec !join.`);
         return;
       }
 
@@ -421,6 +455,7 @@ function startDLiveBot() {
         broadcast({ type: 'raffle_start', prize, endsAt, id: raffle._id });
         setTimeout(() => finishRaffle(raffle._id), duration * 1000);
         console.log(`[BOT] Raffle lancée par ${sender} — ${prize} pts`);
+        await sendChatMessage(`🎰 RAFFLE LANCÉE ! ${prize} pts à distribuer ! Tapez !join pour participer — vous avez ${duration} secondes !`);
         return;
       }
 
