@@ -144,7 +144,7 @@ app.get('/api/me', authMiddleware, async (req, res) => {
 });
 
 app.get('/api/leaderboard', async (req, res) => {
-  const users = await User.find().sort({ totalWagered: -1 }).limit(20).select('username points totalWagered');
+  const users = await User.find({ totalWagered: { $gt: 0 } }).sort({ totalWagered: -1 }).limit(20).select('username points totalWagered');
   res.json(users);
 });
 
