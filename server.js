@@ -412,11 +412,16 @@ function startDLiveBot() {
       if (msg.type !== 'data') return;
 
       const event = msg.payload?.data?.streamMessageReceived;
-      if (!event || event.type !== 'ChatText') return;
+      if (!event) return;
 
-      const content = event.content?.trim().toLowerCase();
-      const sender = event.sender?.username?.toLowerCase();
-      const displayName = event.sender?.displayname || sender;
+      // Handle array or single object
+      const events = Array.isArray(event) ? event : [event];
+      for (const ev of events) {
+        if (!ev || ev.type !== 'Message') continue;
+        const content = ev.content?.trim().toLowerCase();
+        const sender = ev.sender?.username?.toLowerCase();
+        const displayName = ev.sender?.displayname || sender;
+        console.log(`[BOT] Chat — ${displayName}: ${ev.content}`);
 
       // Commande !call nomslot
       const callMatch = content.match(/^!call\s+(.+)$/i);
@@ -466,26 +471,27 @@ function startDLiveBot() {
         setTimeout(() => finishRaffle(raffle._id), duration * 1000);
         console.log(`[BOT] Raffle lancée par ${sender} — ${prize} pts`);
         await sendChatMessage(`🎰 RAFFLE LANCÉE ! ${prize} pts à distribuer ! Tapez !join pour participer — vous avez ${duration} secondes !`);
-        return;
+        continue;
       }
 
       // Commande !join — rejoindre la raffle via pseudo DLive
       if (content === '!join') {
         const raffle = await Raffle.findOne({ status: 'active' });
-        if (!raffle || raffle.endsAt < new Date()) return;
+        if (!raffle || raffle.endsAt < new Date()) continue;
         // Chercher le compte site lié à ce pseudo DLive
         const user = await User.findOne({ dliveUsername: sender });
         if (!user) {
           console.log(`[BOT] !join — ${sender} n'a pas lié son compte (utilise !link CODE)`);
-          return;
+          continue;
         }
-        if (raffle.participants.includes(user.username)) return;
+        if (raffle.participants.includes(user.username)) continue;
         raffle.participants.push(user.username);
         await raffle.save();
         broadcast({ type: 'raffle_join', username: user.username, count: raffle.participants.length });
         console.log(`[BOT] ${sender} (→ ${user.username}) a rejoint la raffle`);
-        return;
+        continue;
       }
+      } // end for loop
 
     } catch (e) {
       console.error('[BOT] Erreur:', e.message);
