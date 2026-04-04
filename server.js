@@ -374,9 +374,11 @@ const DLIVE_SUBSCRIPTION = (username) => JSON.stringify({
   id: '1',
   payload: {
     query: `subscription {
-      streamMessageReceived(streamer: "${username}") {
+      streamMessageReceived(streamer: "${username.toLowerCase()}") {
         type
         ... on ChatText { content sender { displayname username } }
+        ... on ChatGift { gift sender { displayname username } }
+        ... on ChatFollow { sender { displayname username } }
       }
     }`
   }
@@ -391,14 +393,22 @@ function startDLiveBot() {
   const ws = new WebSocket(DLIVE_WS, ['graphql-ws']);
 
   ws.on('open', () => {
-    ws.send(JSON.stringify({ type: 'connection_init' }));
-    setTimeout(() => ws.send(DLIVE_SUBSCRIPTION(username)), 500);
+    ws.send(JSON.stringify({ type: 'connection_init', payload: {} }));
+    setTimeout(() => {
+      ws.send(DLIVE_SUBSCRIPTION(username));
+      console.log('[BOT] Subscription envoyée ✅');
+    }, 1000);
     console.log('[BOT] Connecté au chat DLive ✅');
   });
 
   ws.on('message', async (data) => {
     try {
       const msg = JSON.parse(data);
+      console.log('[BOT] Message reçu:', msg.type, JSON.stringify(msg).substring(0, 100));
+      if (msg.type === 'connection_ack') {
+        console.log('[BOT] Connection ACK reçu ✅');
+        return;
+      }
       if (msg.type !== 'data') return;
 
       const event = msg.payload?.data?.streamMessageReceived;
