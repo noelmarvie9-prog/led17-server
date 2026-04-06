@@ -341,6 +341,7 @@ const ADMIN_USERS = (process.env.ADMIN_USERS || '').toLowerCase().split(',').map
 async function sendChatMessage(message) {
   const token = process.env.DLIVE_BOT_TOKEN;
   const streamer = process.env.DLIVE_USERNAME;
+  console.log('[BOT] sendChatMessage - token existe:', !!token, '- streamer:', streamer);
   if (!token || !streamer) { console.log('[BOT] Token ou streamer manquant'); return; }
   try {
     const res = await fetch(DLIVE_API, {
