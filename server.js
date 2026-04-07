@@ -161,6 +161,68 @@ app.post('/api/points/update', authMiddleware, async (req, res) => {
 });
 
 // ══════════════════════════════════════
+//  ROUTE BOUTIQUE
+// ══════════════════════════════════════
+const ShopRequestSchema = new mongoose.Schema({
+  username: String,
+  item: String,
+  cost: Number,
+  status: { type: String, default: 'pending' },
+  createdAt: { type: Date, default: Date.now }
+});
+const ShopRequest = mongoose.model('ShopRequest', ShopRequestSchema);
+
+app.post('/api/shop/request', authMiddleware, async (req, res) => {
+  try {
+    const { item, cost } = req.body;
+    const req2 = new ShopRequest({ username: req.user.username, item, cost });
+    await req2.save();
+    res.json({ success: true });
+  } catch { res.status(500).json({ error: 'Erreur serveur' }); }
+});
+
+app.get('/api/shop/requests', authMiddleware, adminMiddleware, async (req, res) => {
+  const requests = await ShopRequest.find().sort({ createdAt: -1 }).limit(50);
+  res.json(requests);
+});
+
+app.post('/api/shop/requests/:id/done', authMiddleware, adminMiddleware, async (req, res) => {
+  await ShopRequest.findByIdAndUpdate(req.params.id, { status: 'done' });
+  res.json({ success: true });
+});
+
+app.post('/api/shop/requests/done-all', authMiddleware, adminMiddleware, async (req, res) => {
+  await ShopRequest.updateMany({ status: 'pending' }, { status: 'done' });
+  res.json({ success: true });
+});
+// ══════════════════════════════════════
+app.post('/api/game/bet', authMiddleware, async (req, res) => {
+  try {
+    const { amount } = req.body;
+    if (!amount || amount < 1 || amount > 10000) return res.status(400).json({ error: 'Mise invalide' });
+    const user = await User.findById(req.user.id);
+    if (user.points < amount) return res.status(400).json({ error: 'Pas assez de points' });
+    user.points -= amount;
+    user.totalWagered = (user.totalWagered || 0) + amount;
+    await user.save();
+    broadcast({ type: 'points_update', username: user.username, points: user.points });
+    res.json({ success: true, points: user.points });
+  } catch { res.status(500).json({ error: 'Erreur serveur' }); }
+});
+
+app.post('/api/game/win', authMiddleware, async (req, res) => {
+  try {
+    const { amount } = req.body;
+    if (amount === undefined || amount < 0 || amount > 100000) return res.status(400).json({ error: 'Gain invalide' });
+    const user = await User.findById(req.user.id);
+    user.points += amount;
+    await user.save();
+    broadcast({ type: 'points_update', username: user.username, points: user.points });
+    res.json({ success: true, points: user.points });
+  } catch { res.status(500).json({ error: 'Erreur serveur' }); }
+});
+
+// ══════════════════════════════════════
 //  ROUTE ROUE — 24h cooldown
 // ══════════════════════════════════════
 app.post('/api/wheel/spin', authMiddleware, async (req, res) => {
